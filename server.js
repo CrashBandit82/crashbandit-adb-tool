@@ -483,18 +483,28 @@ screenWss.on('connection', (ws) => {
   // Grab one frame as PNG via exec-out (binary-safe, no CRLF mangling).
   // No fixed delay: the device's own screencap latency (~200-400ms) paces the
   // loop. We fire the next grab the instant the previous frame finishes.
+  const FRAME_PATH = '/sdcard/.cb_frame.png';
   function grabFrame() {
     if (!running || ws.readyState !== ws.OPEN) return;
-    const child = spawn(ADB, ['-s', serial, 'exec-out', 'screencap', '-p']);
-    const chunks = [];
-    child.stdout.on('data', (d) => chunks.push(d));
-    child.stderr.on('data', () => {});
-    child.on('error', () => { if (running) setTimeout(grabFrame, 200); }); // back off on hard error
-    child.on('close', () => {
-      if (running && ws.readyState === ws.OPEN && chunks.length) {
-        ws.send(Buffer.concat(chunks)); // binary PNG frame
-      }
-      if (running) grabFrame(); // immediately request the next frame
+    // Step 1: capture to device storage. exec-out screencap -p hangs on some
+    // devices (Xiaomi/HyperOS), so we write to a file via a plain shell first.
+    const cap = spawn(ADB, ['-s', serial, 'shell', 'screencap', '-p', FRAME_PATH]);
+    cap.stderr.on('data', () => {});
+    cap.on('error', () => { if (running) setTimeout(grabFrame, 200); }); // back off on hard error
+    cap.on('close', () => {
+      if (!running || ws.readyState !== ws.OPEN) return;
+      // Step 2: read the captured file back as a binary stream.
+      const read = spawn(ADB, ['-s', serial, 'exec-out', 'cat', FRAME_PATH]);
+      const chunks = [];
+      read.stdout.on('data', (d) => chunks.push(d));
+      read.stderr.on('data', () => {});
+      read.on('error', () => { if (running) setTimeout(grabFrame, 200); }); // back off on hard error
+      read.on('close', () => {
+        if (running && ws.readyState === ws.OPEN && chunks.length) {
+          ws.send(Buffer.concat(chunks)); // binary PNG frame
+        }
+        if (running) grabFrame(); // immediately request the next frame
+      });
     });
   }
   grabFrame();
