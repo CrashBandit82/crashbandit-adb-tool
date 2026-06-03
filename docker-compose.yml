@@ -1,0 +1,37 @@
+# CrashBandit-ADB-Tool Configuration
+#
+# network_mode: host is the most reliable choice for ADB-over-Wi-Fi: it gives
+# the container direct access to your LAN so `adb connect <phone-ip>` and the
+# mDNS/pairing flows work without NAT hairpinning. The app then listens on the
+# host's :3000 directly.
+#
+# If you prefer an isolated network with an explicit port map instead, comment
+# out `network_mode: host` and uncomment the `ports:` block. Note: with bridged
+# networking, Android 11+ wireless *pairing* (which relies on mDNS discovery)
+# may not work and you'll need plain `adb connect ip:5555`.
+
+version: '3.8'
+
+services:
+  crashbandit-adb-tool:
+    build: .
+    container_name: crashbandit-adb-tool
+    restart: unless-stopped
+    network_mode: "host"
+    # ports:
+    #   - "3000:3000"
+    environment:
+      - PORT=3000
+      - SERVER_ROOT=/data
+      - ADB_BIN=adb
+    volumes:
+      # Persist the adb keypair so devices stay authorized across restarts.
+      - adb-keys:/root/.android
+      # Server-side file store (uploads / pulled APKs land here).
+      - ./data:/data
+      # Live-mount the frontend: edits to public/ take effect on browser reload,
+      # no rebuild needed. (server.js still needs `docker compose restart`.)
+      - ./public:/app/public
+
+volumes:
+  adb-keys:

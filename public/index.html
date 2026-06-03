@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CrashBandit-ADB-Tool</title>
+<link rel="icon" type="image/png" href="/logo.png" />
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          carbon: '#0a0a0a',
+          carbon2: '#121212',
+          carbon3: '#1a1a1a',
+          neon: '#00FF00',
+          cyber: '#FF0033',
+        },
+        fontFamily: { mono: ['"JetBrains Mono"', 'monospace'] },
+      },
+    },
+  };
+</script>
+<style>
+  :root { color-scheme: dark; }
+  * { font-family: 'JetBrains Mono', monospace; }
+  body { background: #000; background-image:
+      radial-gradient(circle at 20% 0%, rgba(0,255,0,0.04), transparent 40%),
+      radial-gradient(circle at 100% 100%, rgba(255,0,51,0.04), transparent 40%); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: #0a0a0a; }
+  ::-webkit-scrollbar-thumb { background: #003300; border-radius: 0; }
+  ::-webkit-scrollbar-thumb:hover { background: #00FF00; }
+
+  .glow-green { box-shadow: 0 0 6px rgba(0,255,0,.55), inset 0 0 4px rgba(0,255,0,.18); border-color:#00FF00; }
+  .glow-red   { box-shadow: 0 0 8px rgba(255,0,51,.7),  inset 0 0 5px rgba(255,0,51,.22); border-color:#FF0033; }
+  .text-glow-green { text-shadow: 0 0 6px rgba(0,255,0,.8); }
+  .text-glow-red   { text-shadow: 0 0 8px rgba(255,0,51,.9); }
+
+  .scanline::before {
+    content:''; position:fixed; inset:0; pointer-events:none; z-index:60;
+    background: repeating-linear-gradient(0deg, rgba(0,255,0,0.025) 0 1px, transparent 1px 3px);
+    mix-blend-mode: overlay;
+  }
+  @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:.15} }
+  .blink { animation: blink 1s steps(1) infinite; }
+  @keyframes pulseRed { 0%,100%{box-shadow:0 0 4px #FF0033} 50%{box-shadow:0 0 16px #FF0033} }
+  .pulse-red { animation: pulseRed 1.1s ease-in-out infinite; }
+
+  .tab-btn.active { background:#001a00; color:#00FF00; box-shadow: inset 0 -2px 0 #00FF00, 0 0 10px rgba(0,255,0,.3); }
+  .tab-btn.active-red { background:#1a0008; color:#FF0033; box-shadow: inset 0 -2px 0 #FF0033, 0 0 10px rgba(255,0,51,.3); }
+
+  input, select { background:#0a0a0a; }
+  .crt { text-shadow: 0 0 2px currentColor; }
+  .modal-overlay { backdrop-filter: blur(2px); background: rgba(20,0,5,.78); }
+  @keyframes glitch { 0%{transform:translate(0)} 20%{transform:translate(-2px,1px)} 40%{transform:translate(2px,-1px)} 60%{transform:translate(-1px,-1px)} 80%{transform:translate(1px,1px)} 100%{transform:translate(0)} }
+  .glitch { animation: glitch .2s steps(2) infinite; }
+  /* neon sign flicker for the CrashBandit brand */
+  @keyframes neonFlicker {
+    0%,18%,22%,25%,53%,57%,100% { text-shadow: 0 0 6px #00FF00, 0 0 12px #00FF00, 0 0 22px rgba(0,255,0,.6); opacity:1; }
+    20%,24%,55% { text-shadow:none; opacity:.55; }
+  }
+  .brand-flicker { animation: neonFlicker 3.5s infinite; }
+</style>
+</head>
+<body class="scanline text-neon min-h-screen text-sm selection:bg-neon selection:text-black">
+
+<!-- ================= HEADER ================= -->
+<header class="border-b border-neon/40 bg-carbon/90 sticky top-0 z-40 backdrop-blur">
+  <div class="max-w-[1500px] mx-auto px-4 py-3 flex items-center gap-4 flex-wrap">
+    <div class="flex items-center gap-2">
+      <img src="/logo.png" alt="CrashBandit" class="h-9 w-auto object-contain" />
+      <span class="text-neon text-glow-green font-extrabold text-lg tracking-widest brand-flicker">CRASH</span>
+      <span class="text-cyber text-glow-red font-extrabold text-lg tracking-widest">BANDIT</span>
+      <span class="text-neon/80 text-glow-green font-bold text-sm tracking-widest">ADB</span>
+      <span class="text-cyber/70 text-[10px] border border-cyber/40 px-1.5 py-0.5 ml-1 tracking-widest">v1.0.0</span>
+    </div>
+    <div class="flex-1"></div>
+    <select id="deviceSelect" class="border border-neon/40 px-2 py-1 text-neon text-xs min-w-[200px] focus:outline-none focus:glow-green"></select>
+    <div id="statusPill" class="flex items-center gap-2 border border-cyber/60 px-3 py-1 text-cyber pulse-red">
+      <span id="statusDot" class="w-2.5 h-2.5 rounded-full bg-cyber blink"></span>
+      <span id="statusText" class="text-xs font-bold tracking-wider">DISCONNECTED</span>
+    </div>
+  </div>
+  <!-- tabs -->
+  <nav class="max-w-[1500px] mx-auto px-2 flex gap-1 flex-wrap text-xs">
+    <button data-tab="connect"  class="tab-btn active px-4 py-2 text-neon/70 hover:text-neon">[ CONNECT ]</button>
+    <button data-tab="apps"     class="tab-btn px-4 py-2 text-neon/70 hover:text-neon">[ APP-MANAGER ]</button>
+    <button data-tab="files"    class="tab-btn px-4 py-2 text-neon/70 hover:text-neon">[ FILES ]</button>
+    <button data-tab="screen"   class="tab-btn px-4 py-2 text-neon/70 hover:text-neon">[ SCREENCAST ]</button>
+    <button data-tab="shell"    class="tab-btn px-4 py-2 text-neon/70 hover:text-neon">[ SHELL ]</button>
+    <button data-tab="defaults" class="tab-btn px-4 py-2 text-neon/70 hover:text-neon">[ DEFAULTS ]</button>
+  </nav>
+</header>
+
+<main class="max-w-[1500px] mx-auto px-4 py-5 pb-72">
+
+<!-- ================= CONNECT ================= -->
+<section data-panel="connect" class="panel">
+  <div class="grid md:grid-cols-2 gap-5">
+    <div class="border border-neon/40 p-5 glow-green">
+      <h2 class="text-neon text-glow-green font-bold mb-4 tracking-wider">> WIRELESS_CONNECT</h2>
+      <label class="block text-neon/60 text-xs mb-1">DEVICE_IP</label>
+      <input id="cIp" placeholder="192.168.1.42" class="w-full border border-neon/30 px-3 py-2 mb-3 text-neon focus:outline-none focus:glow-green" />
+      <label class="block text-neon/60 text-xs mb-1">PORT</label>
+      <input id="cPort" value="5555" class="w-full border border-neon/30 px-3 py-2 mb-4 text-neon focus:outline-none focus:glow-green" />
+      <button id="btnConnect" class="w-full border border-neon px-4 py-2 text-neon hover:bg-neon hover:text-black transition font-bold tracking-wider glow-green">>> CONNECT</button>
+      <button id="btnDisconnect" class="w-full border border-cyber/70 mt-2 px-4 py-2 text-cyber hover:bg-cyber hover:text-black transition font-bold tracking-wider">// DISCONNECT</button>
+    </div>
+
+    <div class="border border-cyber/40 p-5">
+      <h2 class="text-cyber text-glow-red font-bold mb-4 tracking-wider">> PAIR (Android 11+)</h2>
+      <p class="text-neon/40 text-xs mb-3 leading-relaxed">Developer Options → Wireless debugging → "Pair device with pairing code". Use the IP:PORT and 6-digit code shown there.</p>
+      <label class="block text-neon/60 text-xs mb-1">PAIR_IP</label>
+      <input id="pIp" placeholder="192.168.1.42" class="w-full border border-neon/30 px-3 py-2 mb-3 text-neon focus:outline-none focus:glow-green" />
+      <label class="block text-neon/60 text-xs mb-1">PAIR_PORT</label>
+      <input id="pPort" placeholder="37145" class="w-full border border-neon/30 px-3 py-2 mb-3 text-neon focus:outline-none focus:glow-green" />
+      <label class="block text-neon/60 text-xs mb-1">PAIRING_CODE</label>
+      <input id="pCode" placeholder="123456" class="w-full border border-neon/30 px-3 py-2 mb-4 text-neon focus:outline-none focus:glow-green" />
+      <button id="btnPair" class="w-full border border-cyber px-4 py-2 text-cyber hover:bg-cyber hover:text-black transition font-bold tracking-wider glow-red">>> PAIR DEVICE</button>
+    </div>
+  </div>
+
+  <div id="deviceInfo" class="border border-neon/30 p-5 mt-5 hidden">
+    <h2 class="text-neon text-glow-green font-bold mb-3 tracking-wider">> DEVICE_TELEMETRY</h2>
+    <div id="deviceInfoBody" class="grid sm:grid-cols-3 gap-3 text-xs"></div>
+  </div>
+</section>
+
+<!-- ================= APP MANAGER ================= -->
+<section data-panel="apps" class="panel hidden">
+  <div class="flex items-center gap-2 mb-4 flex-wrap">
+    <button id="tabUser" class="appTab active px-5 py-2 border border-neon text-neon font-bold tracking-wider glow-green">USER APPS</button>
+    <button id="tabSystem" class="appTab px-5 py-2 border border-cyber/50 text-cyber/80 font-bold tracking-wider">SYSTEM APPS</button>
+    <input id="appSearch" placeholder="> search name or package…" class="flex-1 min-w-[200px] border border-neon/30 px-3 py-2 text-neon focus:outline-none focus:glow-green" />
+    <label class="flex items-center gap-2 border border-cyber/40 px-3 py-2 text-cyber/90 cursor-pointer text-xs">
+      <input type="checkbox" id="debloatPreset" class="accent-cyber" /> SAFE-DEBLOAT PRESET
+    </label>
+  </div>
+
+  <div class="flex items-center gap-2 mb-3 flex-wrap text-xs">
+    <button id="selAll" class="border border-neon/40 px-3 py-1 hover:glow-green">SELECT ALL</button>
+    <button id="selNone" class="border border-neon/40 px-3 py-1 hover:glow-green">CLEAR</button>
+    <span id="selCount" class="text-neon/60">0 selected</span>
+    <div class="flex-1"></div>
+    <button id="batchDisable" class="border border-yellow-500/60 text-yellow-400 px-3 py-1 hover:bg-yellow-500 hover:text-black transition">DISABLE</button>
+    <button id="batchEnable" class="border border-neon/60 px-3 py-1 hover:bg-neon hover:text-black transition">ENABLE</button>
+    <button id="batchUninstall" class="border border-cyber px-3 py-1 text-cyber hover:bg-cyber hover:text-black transition glow-red">UNINSTALL</button>
+  </div>
+
+  <div class="border border-neon/30 max-h-[55vh] overflow-auto" id="appListWrap">
+    <table class="w-full text-xs">
+      <thead class="sticky top-0 bg-carbon2 text-neon/50 border-b border-neon/20">
+        <tr>
+          <th class="p-2 w-8"></th>
+          <th class="p-2 text-left">APP</th>
+          <th class="p-2 text-left">PACKAGE</th>
+          <th class="p-2 w-20">STATE</th>
+          <th class="p-2 w-44">ACTIONS</th>
+        </tr>
+      </thead>
+      <tbody id="appList"></tbody>
+    </table>
+  </div>
+  <div id="appsEmpty" class="text-neon/40 text-center py-10 hidden">// no device connected — establish a link first</div>
+</section>
+
+<!-- ================= FILES ================= -->
+<section data-panel="files" class="panel hidden">
+  <div class="grid md:grid-cols-2 gap-4">
+    <!-- server pane -->
+    <div class="border border-neon/40 flex flex-col h-[60vh]">
+      <div class="border-b border-neon/30 px-3 py-2 flex items-center gap-2">
+        <span class="text-neon text-glow-green font-bold">SERVER</span>
+        <input id="srvPath" value="/" class="flex-1 border border-neon/20 px-2 py-1 text-neon text-xs focus:outline-none focus:glow-green" />
+        <button id="srvGo" class="border border-neon/40 px-2 py-1 text-xs hover:glow-green">GO</button>
+      </div>
+      <div id="srvList" class="flex-1 overflow-auto p-1 text-xs"></div>
+      <label class="border-t border-neon/30 px-3 py-2 text-xs text-neon/60 cursor-pointer hover:text-neon">
+        + UPLOAD TO SERVER <input type="file" id="srvUpload" class="hidden" />
+      </label>
+    </div>
+    <!-- device pane -->
+    <div id="devPane" class="border border-neon/40 flex flex-col h-[60vh]">
+      <div class="border-b border-neon/30 px-3 py-2 flex items-center gap-2">
+        <span class="text-neon text-glow-green font-bold">DEVICE</span>
+        <input id="devPath" value="/sdcard/" class="flex-1 border border-neon/20 px-2 py-1 text-neon text-xs focus:outline-none focus:glow-green" />
+        <button id="devGo" class="border border-neon/40 px-2 py-1 text-xs hover:glow-green">GO</button>
+      </div>
+      <div id="devList" class="flex-1 overflow-auto p-1 text-xs relative"></div>
+      <div class="border-t border-neon/30 px-3 py-2 text-xs text-neon/50">⇩ drag & drop files here → adb push to current device path</div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SCREENCAST ================= -->
+<section data-panel="screen" class="panel hidden">
+  <div class="flex flex-col lg:flex-row gap-5 items-start">
+    <div class="border border-neon/40 p-3 glow-green">
+      <div class="flex items-center gap-2 mb-2 text-xs">
+        <button id="screenStart" class="border border-neon px-3 py-1 hover:bg-neon hover:text-black transition font-bold">▶ START</button>
+        <button id="screenStop" class="border border-cyber px-3 py-1 text-cyber hover:bg-cyber hover:text-black transition font-bold">■ STOP</button>
+        <span id="fps" class="text-neon/50">-- fps</span>
+      </div>
+      <canvas id="screenCanvas" class="bg-black border border-neon/20 cursor-crosshair" width="360" height="720" style="max-height:75vh;"></canvas>
+    </div>
+    <div class="border border-neon/30 p-4 w-full lg:w-72">
+      <h3 class="text-neon text-glow-green font-bold mb-3">> REMOTE_INPUT</h3>
+      <div class="grid grid-cols-3 gap-2 text-xs mb-4">
+        <button class="keyBtn border border-neon/40 py-2 hover:glow-green" data-key="3">HOME</button>
+        <button class="keyBtn border border-neon/40 py-2 hover:glow-green" data-key="4">BACK</button>
+        <button class="keyBtn border border-neon/40 py-2 hover:glow-green" data-key="187">RECENT</button>
+        <button class="keyBtn border border-neon/40 py-2 hover:glow-green" data-key="24">VOL+</button>
+        <button class="keyBtn border border-neon/40 py-2 hover:glow-green" data-key="25">VOL-</button>
+        <button class="keyBtn border border-neon/40 py-2 hover:glow-green" data-key="26">POWER</button>
+      </div>
+      <label class="block text-neon/60 text-xs mb-1">SEND_TEXT</label>
+      <div class="flex gap-2">
+        <input id="screenText" class="flex-1 border border-neon/30 px-2 py-1 text-neon text-xs focus:outline-none focus:glow-green" />
+        <button id="screenTextSend" class="border border-neon/40 px-3 text-xs hover:glow-green">→</button>
+      </div>
+      <p class="text-neon/40 text-[11px] mt-4 leading-relaxed">Click the canvas to tap. Click-drag to swipe. Coordinates are mapped to the device resolution automatically.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SHELL ================= -->
+<section data-panel="shell" class="panel hidden">
+  <div class="border border-neon/40 glow-green">
+    <div class="border-b border-neon/30 px-3 py-2 text-neon text-glow-green font-bold flex items-center gap-2">
+      <span class="w-2 h-2 rounded-full bg-cyber" id="shellDot"></span> INTERACTIVE_SHELL
+    </div>
+    <div id="shellOut" class="h-[55vh] overflow-auto p-3 text-xs text-neon whitespace-pre-wrap crt leading-relaxed"></div>
+    <div class="border-t border-neon/30 flex items-center px-3 py-2">
+      <span class="text-cyber mr-2">$</span>
+      <input id="shellIn" autocomplete="off" placeholder="getprop ro.product.model" class="flex-1 bg-transparent text-neon focus:outline-none" />
+    </div>
+  </div>
+</section>
+
+<!-- ================= DEFAULTS ================= -->
+<section data-panel="defaults" class="panel hidden">
+  <div class="border border-neon/40 p-5 glow-green">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-neon text-glow-green font-bold tracking-wider">> DEFAULT_LAUNCHER (HOME)</h2>
+      <button id="openDefaultApps" class="border border-neon/40 px-3 py-1 text-xs hover:glow-green">OPEN DEVICE SETTINGS</button>
+    </div>
+    <p class="text-neon/40 text-xs mb-4">Select the package that should handle the HOME intent (launcher). Applied via <span class="text-neon">cmd package set-home-activity</span>.</p>
+    <div id="launcherList" class="space-y-2"></div>
+  </div>
+</section>
+
+</main>
+
+<!-- ================= BOTTOM CONSOLE ================= -->
+<div class="fixed bottom-0 left-0 right-0 z-30 border-t border-neon/40 bg-carbon/95 backdrop-blur">
+  <div class="max-w-[1500px] mx-auto px-4 py-2">
+    <div class="flex items-center gap-2 text-xs text-neon/60 mb-1">
+      <span class="text-cyber">▌</span><span class="text-glow-green">SYSTEM_CONSOLE</span>
+      <div class="flex-1"></div>
+      <button id="consoleClear" class="hover:text-neon">[clear]</button>
+    </div>
+    <div id="console" class="h-28 overflow-auto text-xs whitespace-pre-wrap leading-relaxed"></div>
+  </div>
+</div>
+
+<!-- ================= DRACONIC MODAL ================= -->
+<div id="modal" class="fixed inset-0 z-[70] hidden items-center justify-center modal-overlay">
+  <div class="border-2 border-cyber max-w-lg w-[92%] bg-carbon glow-red p-6">
+    <h2 class="text-cyber text-glow-red text-xl font-extrabold mb-3 glitch tracking-widest">⚠ CRITICAL WARNING</h2>
+    <p class="text-cyber/90 leading-relaxed mb-2 font-bold">YOU ARE MODIFYING A SYSTEM COMPONENT.</p>
+    <p class="text-cyber/70 text-xs leading-relaxed mb-4">BOOTLOOP RISK DETECTED. Removing system packages can render the device unbootable or break core OS functionality. This operation runs <span class="text-neon">pm uninstall --user 0</span> (removes for the current user; recoverable via re-pair + ENABLE in most cases, but NOT guaranteed).</p>
+    <div id="modalTargets" class="border border-cyber/40 p-2 max-h-32 overflow-auto text-xs text-cyber/80 mb-4 font-mono"></div>
+    <label class="flex items-center gap-2 text-cyber cursor-pointer mb-5 text-sm">
+      <input type="checkbox" id="modalConfirm" class="accent-[#FF0033] w-4 h-4" />
+      I understand the bootloop risk and accept full responsibility.
+    </label>
+    <div class="flex gap-3">
+      <button id="modalCancel" class="flex-1 border border-neon px-4 py-2 text-neon hover:bg-neon hover:text-black transition font-bold">ABORT</button>
+      <button id="modalProceed" disabled class="flex-1 border border-cyber px-4 py-2 text-cyber opacity-40 cursor-not-allowed font-bold tracking-wider">PROCEED</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// =====================================================================
+//  CrashBandit-ADB-Tool :: frontend logic
+// =====================================================================
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const api = async (url, opts) => {
+  const r = await fetch(url, opts);
+  const ct = r.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return r.json();
+  return r;
+};
+
+// ---- console logger ----
+const consoleEl = $('#console');
+function logc(msg, kind = 'out') {
+  const colors = { out: 'text-neon/80', ok: 'text-neon text-glow-green', err: 'text-cyber text-glow-red', sys: 'text-neon/40', warn: 'text-yellow-400' };
+  const ts = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.className = colors[kind] || colors.out;
+  line.textContent = `[${ts}] ${msg}`;
+  consoleEl.appendChild(line);
+  consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+$('#consoleClear').onclick = () => consoleEl.innerHTML = '';
+
+// ---- tabs ----
+$$('.tab-btn').forEach((btn) => btn.onclick = () => {
+  $$('.tab-btn').forEach((b) => b.classList.remove('active'));
+  btn.classList.add('active');
+  $$('.panel').forEach((p) => p.classList.add('hidden'));
+  $(`[data-panel="${btn.dataset.tab}"]`).classList.remove('hidden');
+  if (btn.dataset.tab === 'apps') loadApps();
+  if (btn.dataset.tab === 'files') { browseServer(); browseDevice(); }
+  if (btn.dataset.tab === 'defaults') loadLaunchers();
+  if (btn.dataset.tab === 'shell') openShell();
+});
+
+// =====================================================================
+//  CONNECTION
+// =====================================================================
+let connected = false;
+function setStatus(isConn, label) {
+  connected = isConn;
+  const pill = $('#statusPill'), dot = $('#statusDot'), txt = $('#statusText');
+  if (isConn) {
+    pill.className = 'flex items-center gap-2 border border-neon px-3 py-1 text-neon glow-green';
+    dot.className = 'w-2.5 h-2.5 rounded-full bg-neon';
+    txt.textContent = label || 'CONNECTED';
+    txt.className = 'text-xs font-bold tracking-wider text-glow-green';
+  } else {
+    pill.className = 'flex items-center gap-2 border border-cyber/60 px-3 py-1 text-cyber pulse-red';
+    dot.className = 'w-2.5 h-2.5 rounded-full bg-cyber blink';
+    txt.textContent = 'DISCONNECTED';
+    txt.className = 'text-xs font-bold tracking-wider';
+  }
+}
+
+async function refreshDevices() {
+  try {
+    const d = await api('/api/devices');
+    const sel = $('#deviceSelect');
+    sel.innerHTML = '';
+    if (!d.devices.length) {
+      sel.innerHTML = '<option>// no devices</option>';
+      setStatus(false);
+      return;
+    }
+    d.devices.forEach((dev) => {
+      const o = document.createElement('option');
+      o.value = dev.serial;
+      o.textContent = `${dev.serial} [${dev.status}]${dev.model ? ' ' + dev.model : ''}`;
+      if (dev.serial === d.selected) o.selected = true;
+      sel.appendChild(o);
+    });
+    const cur = d.devices.find((x) => x.serial === d.selected);
+    setStatus(cur && cur.status === 'device', d.selected);
+    if (cur && cur.status === 'device') loadDeviceInfo();
+  } catch (e) { logc('device poll failed: ' + e, 'err'); }
+}
+
+$('#deviceSelect').onchange = async (e) => {
+  await api('/api/select', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serial: e.target.value }) });
+  refreshDevices();
+};
+
+$('#btnConnect').onclick = async () => {
+  const ip = $('#cIp').value.trim(), port = $('#cPort').value.trim() || '5555';
+  if (!ip) return logc('IP required', 'err');
+  logc(`adb connect ${ip}:${port} …`, 'sys');
+  $('#btnConnect').disabled = true;
+  $('#btnConnect').textContent = '>> CONNECTING…';
+  try {
+    const r = await api('/api/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip, port }) });
+    logc(r.message || r.error || JSON.stringify(r), r.ok ? 'ok' : 'err');
+    refreshDevices();
+  } catch (e) {
+    logc('CONNECT FAILED – server not reachable? Error: ' + e.message, 'err');
+  } finally {
+    $('#btnConnect').disabled = false;
+    $('#btnConnect').textContent = '>> CONNECT';
+  }
+};
+
+$('#btnDisconnect').onclick = async () => {
+  try {
+    const r = await api('/api/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    logc('disconnect: ' + (r.message || JSON.stringify(r)), 'warn');
+    refreshDevices();
+  } catch (e) {
+    logc('DISCONNECT ERROR: ' + e.message, 'err');
+  }
+};
+
+$('#btnPair').onclick = async () => {
+  const ip = $('#pIp').value.trim(), port = $('#pPort').value.trim(), code = $('#pCode').value.trim();
+  if (!ip || !port || !code) return logc('pair requires ip, port and code', 'err');
+  logc(`adb pair ${ip}:${port} …`, 'sys');
+  $('#btnPair').disabled = true;
+  $('#btnPair').textContent = '>> PAIRING…';
+  try {
+    const r = await api('/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip, port, code }) });
+    const msg = r.message || r.error || JSON.stringify(r);
+    logc(msg, r.ok ? 'ok' : 'err');
+    if (r.ok) logc('✓ Paired! Now use WIRELESS_CONNECT with the device IP and connect-port (usually :5555).', 'sys');
+  } catch (e) {
+    logc('PAIR FAILED – server not reachable? Error: ' + e.message, 'err');
+  } finally {
+    $('#btnPair').disabled = false;
+    $('#btnPair').textContent = '>> PAIR DEVICE';
+  }
+};
+
+async function loadDeviceInfo() {
+  try {
+    const d = await api('/api/deviceinfo');
+    if (!d.ok) return;
+    $('#deviceInfo').classList.remove('hidden');
+    const rows = [
+      ['SERIAL', d.serial], ['MODEL', d.model], ['BRAND', d.brand],
+      ['ANDROID', d.android], ['SDK', d.sdk], ['SCREEN', d.screen],
+    ];
+    $('#deviceInfoBody').innerHTML = rows.map(([k, v]) =>
+      `<div class="border border-neon/20 p-2"><span class="text-neon/40">${k}</span><br><span class="text-neon text-glow-green">${v || '—'}</span></div>`).join('');
+  } catch (_) {}
+}
+
+// =====================================================================
+//  APP MANAGER
+// =====================================================================
+let currentAppType = 'user';
+let appCache = [];
+let selected = new Set();
+
+// known-safe-ish debloat substrings (heuristic — user still confirms)
+const DEBLOAT = [
+  'facebook', 'com.facebook', 'instagram', 'amazon', 'netflix', 'linkedin',
+  'com.google.android.youtube', 'com.google.android.apps.youtube.music',
+  'com.android.chrome', 'com.google.android.googlequicksearchbox',
+  'gallery', 'bloat', 'samsung.android.bixby', 'bixby', 'com.samsung.android.game',
+  'com.microsoft', 'com.miui.analytics', 'com.miui.msa', 'partnerbookmarks',
+  'com.google.android.feedback', 'com.android.bookmarkprovider', 'duokan',
+  'com.heytap', 'com.coloros', 'com.opera', 'spotify', 'booking', 'tiktok', 'musically',
+];
+
+$('#tabUser').onclick = () => switchAppTab('user');
+$('#tabSystem').onclick = () => switchAppTab('system');
+function switchAppTab(t) {
+  currentAppType = t;
+  $('#tabUser').className = 'appTab px-5 py-2 border font-bold tracking-wider ' + (t === 'user' ? 'border-neon text-neon glow-green active' : 'border-neon/40 text-neon/60');
+  $('#tabSystem').className = 'appTab px-5 py-2 border font-bold tracking-wider ' + (t === 'system' ? 'border-cyber text-cyber glow-red pulse-red active' : 'border-cyber/40 text-cyber/60');
+  selected.clear();
+  loadApps();
+}
+
+async function loadApps() {
+  const d = await api('/api/apps?type=' + currentAppType);
+  if (!d.ok) { $('#appsEmpty').classList.remove('hidden'); $('#appList').innerHTML = ''; return; }
+  $('#appsEmpty').classList.add('hidden');
+  appCache = d.apps;
+  renderApps();
+  logc(`loaded ${d.count} ${currentAppType} apps`, 'ok');
+}
+
+function renderApps() {
+  const q = $('#appSearch').value.toLowerCase();
+  const debloat = $('#debloatPreset').checked;
+  const sys = currentAppType === 'system';
+  const rows = appCache.filter((a) =>
+    !q || a.name.toLowerCase().includes(q) || a.package.toLowerCase().includes(q));
+
+  if (debloat) {
+    rows.forEach((a) => { if (DEBLOAT.some((d) => a.package.toLowerCase().includes(d))) selected.add(a.package); });
+  }
+
+  const accent = sys ? 'cyber' : 'neon';
+  $('#appList').innerHTML = rows.map((a) => {
+    const isSel = selected.has(a.package);
+    const isBloat = DEBLOAT.some((d) => a.package.toLowerCase().includes(d));
+    return `<tr class="border-b border-${accent}/10 hover:bg-${accent}/5 ${isBloat ? 'bg-cyber/5' : ''}">
+      <td class="p-2 text-center"><input type="checkbox" data-pkg="${a.package}" ${isSel ? 'checked' : ''} class="appChk accent-${sys ? '[#FF0033]' : '[#00FF00]'}"></td>
+      <td class="p-2 text-${accent} ${sys ? '' : 'text-glow-green'} font-bold">${a.name}${isBloat ? ' <span class="text-cyber text-[10px]">⛒BLOAT</span>' : ''}</td>
+      <td class="p-2 text-${accent}/60">${a.package}</td>
+      <td class="p-2 text-center">${a.disabled ? '<span class="text-cyber">DISABLED</span>' : '<span class="text-neon">ON</span>'}</td>
+      <td class="p-2">
+        <div class="flex gap-2 justify-center">
+          <button class="actBackup border border-neon/40 px-3 py-1 text-xs font-bold min-w-[64px] text-neon hover:bg-neon hover:text-black transition" data-pkg="${a.package}">⇩ APK</button>
+          <button class="actUninstall border border-cyber/50 px-3 py-1 text-xs font-bold min-w-[64px] text-cyber hover:bg-cyber hover:text-black transition" data-pkg="${a.package}" data-sys="${sys}">DEL</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  $$('.appChk').forEach((c) => c.onchange = () => {
+    c.checked ? selected.add(c.dataset.pkg) : selected.delete(c.dataset.pkg);
+    updateSelCount();
+  });
+  $$('.actBackup').forEach((b) => b.onclick = () => backupApk(b.dataset.pkg));
+  $$('.actUninstall').forEach((b) => b.onclick = () =>
+    requestUninstall([b.dataset.pkg], b.dataset.sys === 'true'));
+  updateSelCount();
+}
+
+function updateSelCount() { $('#selCount').textContent = `${selected.size} selected`; }
+$('#appSearch').oninput = renderApps;
+$('#debloatPreset').onchange = renderApps;
+$('#selAll').onclick = () => { $$('.appChk').forEach((c) => { c.checked = true; selected.add(c.dataset.pkg); }); updateSelCount(); };
+$('#selNone').onclick = () => { selected.clear(); $$('.appChk').forEach((c) => c.checked = false); updateSelCount(); };
+
+function backupApk(pkg) {
+  logc(`extracting APK: ${pkg} …`, 'sys');
+  const a = document.createElement('a');
+  a.href = '/api/apk/' + encodeURIComponent(pkg);
+  a.download = pkg + '.apk';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+// batch buttons
+$('#batchUninstall').onclick = () => {
+  if (!selected.size) return logc('nothing selected', 'warn');
+  requestUninstall([...selected], currentAppType === 'system');
+};
+$('#batchDisable').onclick = async () => {
+  if (!selected.size) return logc('nothing selected', 'warn');
+  const r = await api('/api/disable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packages: [...selected] }) });
+  r.results.forEach((x) => logc(`disable ${x.package}: ${x.ok ? 'OK' : 'FAIL'} ${x.out}`, x.ok ? 'warn' : 'err'));
+  loadApps();
+};
+$('#batchEnable').onclick = async () => {
+  if (!selected.size) return logc('nothing selected', 'warn');
+  const r = await api('/api/enable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packages: [...selected] }) });
+  r.results.forEach((x) => logc(`enable ${x.package}: ${x.ok ? 'OK' : 'FAIL'} ${x.out}`, x.ok ? 'ok' : 'err'));
+  loadApps();
+};
+
+// ---- draconic modal flow ----
+let pendingUninstall = [];
+function requestUninstall(packages, isSystem) {
+  pendingUninstall = packages;
+  if (isSystem) {
+    $('#modalTargets').innerHTML = packages.map((p) => `▸ ${p}`).join('<br>');
+    $('#modalConfirm').checked = false;
+    setProceed(false);
+    $('#modal').classList.remove('hidden');
+    $('#modal').classList.add('flex');
+  } else {
+    doUninstall(packages);
+  }
+}
+function setProceed(on) {
+  const b = $('#modalProceed');
+  b.disabled = !on;
+  b.className = 'flex-1 border border-cyber px-4 py-2 font-bold tracking-wider ' +
+    (on ? 'text-cyber hover:bg-cyber hover:text-black transition glow-red cursor-pointer' : 'text-cyber opacity-40 cursor-not-allowed');
+}
+$('#modalConfirm').onchange = (e) => setProceed(e.target.checked);
+$('#modalCancel').onclick = () => { $('#modal').classList.add('hidden'); $('#modal').classList.remove('flex'); logc('uninstall aborted by operator', 'warn'); };
+$('#modalProceed').onclick = () => {
+  if ($('#modalProceed').disabled) return;
+  $('#modal').classList.add('hidden'); $('#modal').classList.remove('flex');
+  doUninstall(pendingUninstall);
+};
+async function doUninstall(packages) {
+  logc(`uninstalling ${packages.length} package(s) …`, 'warn');
+  const r = await api('/api/uninstall', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packages }) });
+  r.results.forEach((x) => logc(`uninstall ${x.package}: ${x.ok ? 'SUCCESS' : 'FAIL'} ${x.out}`, x.ok ? 'ok' : 'err'));
+  selected.clear();
+  loadApps();
+}
+
+// =====================================================================
+//  FILE MANAGER
+// =====================================================================
+async function browseServer(p) {
+  const path = (p != null ? p : $('#srvPath').value) || '/';
+  $('#srvPath').value = path;
+  const d = await api('/api/fs/server?path=' + encodeURIComponent(path));
+  if (!d.ok) return logc('server fs: ' + d.error, 'err');
+  $('#srvList').innerHTML = renderFsEntries(d.entries, path, 'srv');
+  bindFsRows('srv');
+}
+async function browseDevice(p) {
+  const path = (p != null ? p : $('#devPath').value) || '/sdcard/';
+  $('#devPath').value = path;
+  const d = await api('/api/fs/device?path=' + encodeURIComponent(path));
+  if (!d.ok) { $('#devList').innerHTML = `<div class="text-cyber p-2">// ${d.error}</div>`; return; }
+  $('#devList').innerHTML = renderFsEntries(d.entries, path, 'dev');
+  bindFsRows('dev');
+}
+function renderFsEntries(entries, path, pane) {
+  const up = pane === 'srv'
+    ? path.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/'
+    : (path.replace(/\/+$/, '').split('/').slice(0, -1).join('/') + '/') || '/';
+  let html = `<div class="fsUp px-2 py-1 hover:bg-neon/10 cursor-pointer text-neon/50" data-path="${up}">▲ ..</div>`;
+  html += entries.map((e) => {
+    const full = (path.replace(/\/+$/, '') + '/' + e.name).replace(/\/\/+/, '/');
+    if (e.dir) return `<div class="fsDir px-2 py-1 hover:bg-neon/10 cursor-pointer text-neon" data-path="${full}/">▸ ${e.name}/</div>`;
+    const dl = pane === 'dev'
+      ? `<a class="actDownload border border-cyber/50 px-3 py-1 text-xs font-bold min-w-[64px] text-center text-cyber hover:bg-cyber hover:text-black transition" href="/api/fs/pull?path=${encodeURIComponent(full)}" title="Download ${e.name}">⇩ DL</a>`
+      : '';
+    return `<div class="px-2 py-1 hover:bg-neon/5 flex items-center justify-between gap-2 text-neon/70"><span class="truncate">◦ ${e.name}</span><span class="flex items-center gap-2 shrink-0"><span class="text-neon/30 text-[10px]">${e.size ? (e.size + 'b') : ''}</span>${dl}</span></div>`;
+  }).join('');
+  return html;
+}
+function bindFsRows(pane) {
+  const list = pane === 'srv' ? '#srvList' : '#devList';
+  const fn = pane === 'srv' ? browseServer : browseDevice;
+  $$(`${list} .fsDir, ${list} .fsUp`).forEach((el) => el.onclick = () => fn(el.dataset.path));
+}
+$('#srvGo').onclick = () => browseServer();
+$('#devGo').onclick = () => browseDevice();
+$('#srvPath').onkeydown = (e) => e.key === 'Enter' && browseServer();
+$('#devPath').onkeydown = (e) => e.key === 'Enter' && browseDevice();
+
+$('#srvUpload').onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  const fd = new FormData(); fd.append('file', f); fd.append('path', $('#srvPath').value);
+  logc(`uploading ${f.name} → server …`, 'sys');
+  const r = await api('/api/fs/server-upload', { method: 'POST', body: fd });
+  logc(r.ok ? `stored ${f.name}` : 'upload failed', r.ok ? 'ok' : 'err');
+  browseServer();
+};
+
+// drag & drop → adb push
+const devPane = $('#devPane');
+['dragenter', 'dragover'].forEach((ev) => devPane.addEventListener(ev, (e) => { e.preventDefault(); devPane.classList.add('glow-green'); }));
+['dragleave', 'drop'].forEach((ev) => devPane.addEventListener(ev, (e) => { e.preventDefault(); devPane.classList.remove('glow-green'); }));
+devPane.addEventListener('drop', async (e) => {
+  const files = [...e.dataTransfer.files];
+  for (const f of files) {
+    const fd = new FormData(); fd.append('file', f); fd.append('remote', $('#devPath').value);
+    logc(`adb push ${f.name} → ${$('#devPath').value} …`, 'sys');
+    const r = await api('/api/fs/push', { method: 'POST', body: fd });
+    logc(r.ok ? `pushed → ${r.remote}` : ('push failed: ' + r.error), r.ok ? 'ok' : 'err');
+  }
+  browseDevice();
+});
+
+// =====================================================================
+//  SCREENCAST
+// =====================================================================
+let screenWs = null, frameCount = 0, lastFpsT = 0;
+const canvas = $('#screenCanvas'), ctx = canvas.getContext('2d');
+let devW = 0, devH = 0;
+let dragStart = null;
+
+$('#screenStart').onclick = startScreen;
+$('#screenStop').onclick = stopScreen;
+
+function startScreen() {
+  if (screenWs) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  screenWs = new WebSocket(`${proto}://${location.host}/ws/screen`);
+  screenWs.binaryType = 'arraybuffer';
+  logc('screencast: opening stream …', 'sys');
+  screenWs.onmessage = (ev) => {
+    if (typeof ev.data === 'string') {
+      const m = JSON.parse(ev.data);
+      if (m.type === 'meta') { devW = m.width; devH = m.height; canvas.width = m.width; canvas.height = m.height; }
+      else if (m.type === 'err') logc('screen: ' + m.data, 'err');
+      return;
+    }
+    // Decode off the main thread via createImageBitmap (no blob URL, no <img>
+    // load → no per-frame layout reflow). Bitmap is released after drawing.
+    const blob = new Blob([ev.data], { type: 'image/png' });
+    createImageBitmap(blob).then((bitmap) => {
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      frameCount++;
+      const now = performance.now();
+      if (now - lastFpsT > 1000) { $('#fps').textContent = frameCount + ' fps'; frameCount = 0; lastFpsT = now; }
+    }).catch(() => {});
+  };
+  screenWs.onclose = () => { logc('screencast: stream closed', 'warn'); screenWs = null; };
+  screenWs.onerror = () => logc('screencast: socket error', 'err');
+}
+function stopScreen() { if (screenWs) screenWs.close(); screenWs = null; }
+
+function canvasToDevice(ev) {
+  const r = canvas.getBoundingClientRect();
+  const x = (ev.clientX - r.left) / r.width * (devW || canvas.width);
+  const y = (ev.clientY - r.top) / r.height * (devH || canvas.height);
+  return { x, y };
+}
+canvas.addEventListener('mousedown', (e) => { dragStart = canvasToDevice(e); });
+canvas.addEventListener('mouseup', (e) => {
+  if (!screenWs || !dragStart) return;
+  const end = canvasToDevice(e);
+  const dist = Math.hypot(end.x - dragStart.x, end.y - dragStart.y);
+  if (dist > 12) {
+    screenWs.send(JSON.stringify({ type: 'swipe', x1: dragStart.x, y1: dragStart.y, x2: end.x, y2: end.y, dur: 200 }));
+    logc(`swipe (${dragStart.x | 0},${dragStart.y | 0})→(${end.x | 0},${end.y | 0})`, 'sys');
+  } else {
+    screenWs.send(JSON.stringify({ type: 'tap', x: end.x, y: end.y }));
+    logc(`tap (${end.x | 0},${end.y | 0})`, 'sys');
+  }
+  dragStart = null;
+});
+$$('.keyBtn').forEach((b) => b.onclick = () => {
+  if (!screenWs) return logc('start the screencast first', 'warn');
+  screenWs.send(JSON.stringify({ type: 'key', code: parseInt(b.dataset.key, 10) }));
+});
+$('#screenTextSend').onclick = () => {
+  if (!screenWs) return logc('start the screencast first', 'warn');
+  const t = $('#screenText').value; if (!t) return;
+  screenWs.send(JSON.stringify({ type: 'text', text: t }));
+  $('#screenText').value = '';
+};
+
+// =====================================================================
+//  INTERACTIVE SHELL
+// =====================================================================
+let shellWs = null;
+const shellOut = $('#shellOut'), shellIn = $('#shellIn');
+const shellHist = []; let histIdx = -1;
+function openShell() {
+  if (shellWs && shellWs.readyState <= 1) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  shellWs = new WebSocket(`${proto}://${location.host}/ws/console`);
+  $('#shellDot').className = 'w-2 h-2 rounded-full bg-cyber blink';
+  shellWs.onopen = () => { $('#shellDot').className = 'w-2 h-2 rounded-full bg-neon'; };
+  shellWs.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    const span = document.createElement('span');
+    span.className = m.type === 'err' ? 'text-cyber' : m.type === 'sys' ? 'text-neon/40' : 'text-neon';
+    span.textContent = m.data;
+    shellOut.appendChild(span);
+    shellOut.scrollTop = shellOut.scrollHeight;
+  };
+  shellWs.onclose = () => { $('#shellDot').className = 'w-2 h-2 rounded-full bg-cyber'; shellWs = null; };
+}
+shellIn.onkeydown = (e) => {
+  if (e.key === 'Enter') {
+    const cmd = shellIn.value;
+    if (!shellWs) { logc('shell not connected', 'err'); return; }
+    const echo = document.createElement('div'); echo.className = 'text-cyber'; echo.textContent = '$ ' + cmd;
+    shellOut.appendChild(echo);
+    shellWs.send(JSON.stringify({ cmd }));
+    if (cmd.trim()) shellHist.push(cmd);
+    histIdx = shellHist.length;
+    shellIn.value = '';
+  } else if (e.key === 'ArrowUp') {
+    if (histIdx > 0) { histIdx--; shellIn.value = shellHist[histIdx] || ''; }
+    e.preventDefault();
+  } else if (e.key === 'ArrowDown') {
+    if (histIdx < shellHist.length - 1) { histIdx++; shellIn.value = shellHist[histIdx] || ''; }
+    else { histIdx = shellHist.length; shellIn.value = ''; }
+    e.preventDefault();
+  }
+};
+
+// =====================================================================
+//  DEFAULTS / LAUNCHERS
+// =====================================================================
+async function loadLaunchers() {
+  const d = await api('/api/launchers');
+  if (!d.ok) { $('#launcherList').innerHTML = `<div class="text-cyber">// ${d.error}</div>`; return; }
+  $('#launcherList').innerHTML = d.launchers.map((l) =>
+    `<div class="flex items-center justify-between border border-neon/20 p-3">
+      <div><div class="text-neon text-glow-green">${l.package}</div><div class="text-neon/40 text-[11px]">${l.component}</div></div>
+      <button class="setHome border border-neon px-4 py-1 text-neon hover:bg-neon hover:text-black transition font-bold" data-comp="${l.component}">SET DEFAULT</button>
+    </div>`).join('') || '<div class="text-neon/40">no HOME activities found</div>';
+  $$('.setHome').forEach((b) => b.onclick = async () => {
+    const r = await api('/api/set-home', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ component: b.dataset.comp }) });
+    logc(`set-home ${b.dataset.comp}: ${r.ok ? 'OK' : 'FAIL'} ${r.message}`, r.ok ? 'ok' : 'err');
+  });
+}
+$('#openDefaultApps').onclick = async () => {
+  const r = await api('/api/open-default-apps', { method: 'POST' });
+  logc('opened default-apps settings on device', 'ok');
+};
+
+// =====================================================================
+//  BOOT
+// =====================================================================
+logc('CrashBandit-ADB-Tool frontend online', 'ok');
+refreshDevices();
+setInterval(refreshDevices, 5000);
+</script>
+</body>
+</html>

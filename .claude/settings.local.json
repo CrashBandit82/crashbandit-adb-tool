@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker --version)",
+      "Bash(command -v node npm docker docker-compose adb)",
+      "Bash(docker run *)",
+      "Bash(docker compose up *)",
+      "Bash(curl -s -o /dev/null -w \"GET / -> HTTP %{http_code}\\\\n\" http://localhost:3000/)",
+      "Bash(curl -s http://localhost:3000/api/devices)",
+      "Bash(docker rm *)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(docker compose *)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}
