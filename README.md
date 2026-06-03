@@ -6,6 +6,20 @@ A browser-based ADB interface. Connect Android devices over Wi-Fi, manage apps, 
 - Docker
 - Android device with Developer Options + Wireless Debugging enabled (Android 11+)
 
+## Android Device Setup
+
+1. Go to **Settings → About Phone** and tap **MIUI Version** / **HyperOS Version** 7 times to enable Developer Options
+2. Go to **Settings → Additional Settings → Developer Options** and enable:
+   - **USB Debugging**
+   - **USB Debugging (Security Settings)** ← important on Xiaomi
+   - **Wireless Debugging**
+3. Tap **Wireless Debugging** → **Pair device with pairing code**
+4. Enter the IP, pairing port and 6-digit code shown on the screen into the PAIR form on the website
+5. After pairing, go back to the Wireless Debugging screen and note the **IP and port** shown there
+6. Enter that IP and port into the CONNECT form on the website
+
+> **Xiaomi/HyperOS users:** If touch input (screencast tap) does not work, look for **"Allow simulated inputs"** or **"Extended ADB access"** in Developer Options and enable it.
+
 ## Install
 ```bash
 git clone https://github.com/CrashBandit82/crashbandit-adb-tool
