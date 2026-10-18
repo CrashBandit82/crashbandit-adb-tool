@@ -58,3 +58,9 @@ Run only on a trusted private network. Never expose port 3000 to the public inte
 
 ## License
 Custom non-commercial license — see LICENSE file.
+
+## License
+
+Copyright (C) 2026 CrashBandit82
+
+CrashBandit ADB Tool is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License v3.0** as published by the Free Software Foundation. If you run a modified version as a network service, you must make its source code available to its users. See [LICENSE](LICENSE) for the full text.
