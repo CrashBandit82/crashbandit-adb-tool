@@ -1,63 +1,65 @@
-# CrashBandit ADB Tool
+<p align="right"><b>English</b> · <a href="README.de.md">Deutsch</a></p>
 
-A browser-based ADB interface. Connect Android devices over Wi-Fi, manage apps, browse files, screencast the display and run shell commands — no USB cable needed.
+<p align="center"><img src="public/logo.png" width="96" alt="CrashBandit ADB Tool"></p>
+
+<h1 align="center">CrashBandit ADB Tool</h1>
+
+<p align="center">A browser-based ADB interface. Connect Android devices over Wi-Fi, manage apps, browse files, screencast the display and run shell commands – no USB cable needed.</p>
+
+---
+
+## Features
+
+- **Wireless pairing & connect** (Android 11+)
+- **App manager** – list, uninstall, disable/enable, APK export
+- **File manager** – push & pull files between server and device
+- **Screencast** – live display with touch control
+- **Interactive shell** – `adb shell` in the browser
+- **Default apps** – manage launchers and defaults
 
 ## Requirements
+
 - Docker
-- Android device with Developer Options + Wireless Debugging enabled (Android 11+)
-
-## Android Device Setup
-
-1. Go to **Settings → About Phone** and tap **MIUI Version** / **HyperOS Version** 7 times to enable Developer Options
-2. Go to **Settings → Additional Settings → Developer Options** and enable:
-   - **USB Debugging**
-   - **USB Debugging (Security Settings)** ← important on Xiaomi
-   - **Wireless Debugging**
-3. Tap **Wireless Debugging** → **Pair device with pairing code**
-4. Enter the IP, pairing port and 6-digit code shown on the screen into the PAIR form on the website
-5. After pairing, go back to the Wireless Debugging screen and note the **IP and port** shown there
-6. Enter that IP and port into the CONNECT form on the website
-
-> **Xiaomi/HyperOS users:** If touch input (screencast tap) does not work, look for **"Allow simulated inputs"** or **"Extended ADB access"** in Developer Options and enable it.
+- Android device with Developer Options and Wireless Debugging enabled (Android 11+)
 
 ## Install
+
 ```bash
 git clone https://github.com/CrashBandit82/crashbandit-adb-tool
 cd crashbandit-adb-tool
-docker build -t crashbandit-adb-tool .
-docker run -d --name crashbandit-adb-tool -p 3000:3000 --restart unless-stopped crashbandit-adb-tool
+echo "ADB_TOOL_PASSWORD=choose-a-long-password" > .env
+docker compose up -d --build
 ```
 
-Open in browser: `http://localhost:3000`
+Open `http://<host>:3000` in the browser. The browser asks for a login – any user name works, the password is the one from `.env`.
 
-## Features
-- Wireless Pairing & Connect (Android 11+)
-- App Manager – install, uninstall, disable, APK export
-- File Manager – push & pull files between server and device
-- Screencast – live display with touch control
-- Interactive Shell – adb shell in the browser
-- Default Apps – manage launchers and defaults
+`docker-compose.yml` uses `network_mode: host`, which makes Wi-Fi pairing (mDNS) work reliably.
+
+## Android device setup
+
+1. **Settings → About phone** – tap the build number (Xiaomi: **MIUI/HyperOS version**) 7 times to enable Developer Options.
+2. In **Developer Options** enable:
+   - **USB debugging**
+   - **USB debugging (Security settings)** ← important on Xiaomi
+   - **Wireless debugging**
+3. Tap **Wireless debugging → Pair device with pairing code**.
+4. Enter the IP, pairing port and 6-digit code into the **PAIR** form.
+5. Back on the Wireless debugging screen, note the **IP and port** shown there.
+6. Enter that IP and port into the **CONNECT** form.
+
+> **Xiaomi/HyperOS:** if tapping in the screencast does not work, enable **"Allow simulated inputs"** or **"Extended ADB access"** in Developer Options.
 
 ## Security
 
-**Set a password.** Create a `.env` file next to `docker-compose.yml`:
-
-```
-ADB_TOOL_PASSWORD=choose-a-long-password
-```
-
-Then `docker compose up -d --build`. The browser asks for a login – any user name works, the password is the one above. Without a password the tool prints a warning on startup and **everyone on your network gets full shell access to your connected phones**.
+**Always set a password** (`ADB_TOOL_PASSWORD`). Without it the tool prints a warning on startup and **everyone on your network gets full shell access to your connected phones**.
 
 Built-in protection (since v1.1.0):
-- Optional login via `ADB_TOOL_PASSWORD` (HTTP Basic Auth, also enforced for the console and screen WebSockets)
+- Login via `ADB_TOOL_PASSWORD` (HTTP Basic Auth, also for the console and screen WebSockets)
 - Same-origin check: other websites you visit cannot drive the tool through your browser
 - Package names, components and device paths are validated / quoted before they reach the phone's shell
 - ADB platform-tools pinned to a fixed version and verified by SHA-256
 
 Run only on a trusted private network. Never expose port 3000 to the public internet.
-
-## License
-Custom non-commercial license — see LICENSE file.
 
 ## License
 
