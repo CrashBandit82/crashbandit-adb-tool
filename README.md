@@ -38,7 +38,22 @@ Open in browser: `http://localhost:3000`
 - Interactive Shell – adb shell in the browser
 - Default Apps – manage launchers and defaults
 
-## Warning
+## Security
+
+**Set a password.** Create a `.env` file next to `docker-compose.yml`:
+
+```
+ADB_TOOL_PASSWORD=choose-a-long-password
+```
+
+Then `docker compose up -d --build`. The browser asks for a login – any user name works, the password is the one above. Without a password the tool prints a warning on startup and **everyone on your network gets full shell access to your connected phones**.
+
+Built-in protection (since v1.1.0):
+- Optional login via `ADB_TOOL_PASSWORD` (HTTP Basic Auth, also enforced for the console and screen WebSockets)
+- Same-origin check: other websites you visit cannot drive the tool through your browser
+- Package names, components and device paths are validated / quoted before they reach the phone's shell
+- ADB platform-tools pinned to a fixed version and verified by SHA-256
+
 Run only on a trusted private network. Never expose port 3000 to the public internet.
 
 ## License

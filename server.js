@@ -7,14 +7,15 @@
  * Android devices reachable over Wi-Fi (ADB over TCP/IP).
  *
  * WARNING: This tool exposes raw `adb shell` access to its operator. Run it ONLY
- * on a trusted network / behind your own auth. Never expose port 3000 to the
- * public internet without a reverse-proxy + authentication in front of it.
+ * on a trusted network. Set ADB_TOOL_PASSWORD to require a login, and never
+ * expose port 3000 to the public internet.
  */
 
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const http = require('http');
+const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const express = require('express');
 const multer = require('multer');
@@ -24,6 +25,8 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 const ADB = process.env.ADB_BIN || 'adb';
 const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(os.tmpdir(), 'adb-net-uploads');
 const SERVER_ROOT = process.env.SERVER_ROOT || '/data'; // server-side file browser root
+// Optional login (HTTP Basic Auth, any user name). Empty = no login (LAN only!).
+const PASSWORD = process.env.ADB_TOOL_PASSWORD || '';
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 try { fs.mkdirSync(SERVER_ROOT, { recursive: true }); } catch (_) { /* ignore */ }
@@ -44,6 +47,16 @@ function withTarget(args, useTarget = true) {
   }
   return args;
 }
+
+// `adb shell` joins its arguments into ONE command line for the device shell,
+// so anything user-supplied must be quoted to stay a single literal argument.
+function shQuote(v) {
+  return "'" + String(v).replace(/'/g, "'\\''") + "'";
+}
+
+const PKG_RE = /^[A-Za-z0-9_.]+$/;
+const COMPONENT_RE = /^[A-Za-z0-9_.]+\/[A-Za-z0-9_.$]+$/;
+const validPackages = (list) => Array.isArray(list) && list.every((p) => typeof p === 'string' && PKG_RE.test(p));
 
 // Run adb and buffer the (text) output. Rejects on non-zero exit.
 function adb(args, { useTarget = true, timeout = 30000, maxBuffer = 1024 * 1024 * 64 } = {}) {
@@ -123,10 +136,43 @@ function friendlyName(pkg) {
 //  Express app
 // ---------------------------------------------------------------------------
 const app = express();
+
+// --- Security: login + same-origin guard ------------------------------------
+
+function passwordOk(req) {
+  if (!PASSWORD) return true;
+  const m = /^Basic\s+(.+)$/i.exec(req.headers.authorization || '');
+  if (!m) return false;
+  const decoded = Buffer.from(m[1], 'base64').toString();
+  const given = Buffer.from(decoded.slice(decoded.indexOf(':') + 1));
+  const want = Buffer.from(PASSWORD);
+  return given.length === want.length && crypto.timingSafeEqual(given, want);
+}
+
+// Browsers attach the Origin header to WebSocket handshakes and cross-site
+// requests. Without this check any website you visit could drive the tool
+// (incl. a shell on your phone) through your browser.
+function sameOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // non-browser client (curl etc.)
+  try { return new URL(origin).host === req.headers.host; } catch { return false; }
+}
+
+app.use((req, res, next) => {
+  if (!passwordOk(req)) {
+    res.set('WWW-Authenticate', 'Basic realm="CrashBandit ADB Tool", charset="UTF-8"');
+    return res.status(401).send('Login required');
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD' && !sameOrigin(req)) {
+    return res.status(403).json({ ok: false, error: 'cross-origin request blocked' });
+  }
+  next();
+});
+
 app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-const upload = multer({ dest: UPLOAD_DIR, limits: { fileSize: 1024 * 1024 * 1024 } });
+const upload = multer({ dest: UPLOAD_DIR, limits: { fileSize: 512 * 1024 * 1024 } });
 
 // small async wrapper
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
@@ -235,6 +281,7 @@ app.get('/api/apps', wrap(async (req, res) => {
 
 app.post('/api/uninstall', wrap(async (req, res) => {
   const { packages = [], keepData = false } = req.body || {};
+  if (!validPackages(packages)) return res.status(400).json({ ok: false, error: 'invalid package name' });
   const results = [];
   for (const p of packages) {
     try {
@@ -253,6 +300,7 @@ app.post('/api/uninstall', wrap(async (req, res) => {
 
 app.post('/api/disable', wrap(async (req, res) => {
   const { packages = [] } = req.body || {};
+  if (!validPackages(packages)) return res.status(400).json({ ok: false, error: 'invalid package name' });
   const results = [];
   for (const p of packages) {
     try {
@@ -267,6 +315,7 @@ app.post('/api/disable', wrap(async (req, res) => {
 
 app.post('/api/enable', wrap(async (req, res) => {
   const { packages = [] } = req.body || {};
+  if (!validPackages(packages)) return res.status(400).json({ ok: false, error: 'invalid package name' });
   const results = [];
   for (const p of packages) {
     try {
@@ -300,7 +349,7 @@ app.get('/api/apk/:pkg', wrap(async (req, res) => {
   if (paths.length > 1) res.setHeader('X-APK-Splits', String(paths.length));
 
   // Stream the apk straight off the device — no temp file.
-  const child = adbSpawn(['exec-out', 'cat', base]);
+  const child = adbSpawn(['exec-out', 'cat', shQuote(base)]);
   child.stdout.pipe(res);
   child.stderr.on('data', () => {});
   child.on('error', () => { if (!res.headersSent) res.status(500).end('pull error'); });
@@ -330,7 +379,7 @@ app.get('/api/fs/device', wrap(async (req, res) => {
   if (!state.selectedSerial) return res.json({ ok: false, error: 'no device selected' });
   const dir = req.query.path || '/sdcard/';
   // -p marks dirs with trailing slash, -1 one per line, -A include dotfiles
-  const { stdout } = await adb(['shell', 'ls', '-1Ap', dir.replace(/"/g, '')]);
+  const { stdout } = await adb(['shell', 'ls', '-1Ap', shQuote(dir)]);
   const entries = stdout.split('\n')
     .map((l) => l.trim())
     .filter(Boolean)
@@ -343,8 +392,8 @@ app.get('/api/fs/device', wrap(async (req, res) => {
 app.post('/api/fs/push', upload.single('file'), wrap(async (req, res) => {
   if (!state.selectedSerial) return res.status(400).json({ ok: false, error: 'no device selected' });
   if (!req.file) return res.status(400).json({ ok: false, error: 'no file' });
-  const remoteDir = (req.body.remote || '/sdcard/').replace(/"/g, '');
-  const remotePath = remoteDir.replace(/\/+$/, '') + '/' + req.file.originalname;
+  const remoteDir = String(req.body.remote || '/sdcard/');
+  const remotePath = remoteDir.replace(/\/+$/, '') + '/' + path.basename(req.file.originalname);
   try {
     const { stdout, stderr } = await adb(['push', req.file.path, remotePath], { timeout: 600000 });
     res.json({ ok: true, message: (stdout + stderr).trim(), remote: remotePath });
@@ -361,7 +410,7 @@ app.get('/api/fs/pull', wrap(async (req, res) => {
   const name = remote.split('/').filter(Boolean).pop() || 'file';
   res.setHeader('Content-Type', 'application/octet-stream');
   res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
-  const child = adbSpawn(['exec-out', 'cat', remote]);
+  const child = adbSpawn(['exec-out', 'cat', shQuote(remote)]);
   child.stdout.pipe(res);
   child.stderr.on('data', () => {});
   child.on('error', () => { if (!res.headersSent) res.status(500).end('pull error'); });
@@ -371,7 +420,7 @@ app.get('/api/fs/pull', wrap(async (req, res) => {
 // Upload a file directly from the browser into the server file store.
 app.post('/api/fs/server-upload', upload.single('file'), wrap(async (req, res) => {
   if (!req.file) return res.status(400).json({ ok: false, error: 'no file' });
-  const dest = safeServerPath((req.body.path || '/') + '/' + req.file.originalname);
+  const dest = safeServerPath((req.body.path || '/') + '/' + path.basename(req.file.originalname));
   fs.renameSync(req.file.path, dest);
   res.json({ ok: true, path: dest });
 }));
@@ -395,7 +444,7 @@ app.get('/api/launchers', wrap(async (req, res) => {
 
 app.post('/api/set-home', wrap(async (req, res) => {
   const { component } = req.body || {};
-  if (!component) return res.status(400).json({ ok: false, error: 'component required' });
+  if (!component || !COMPONENT_RE.test(component)) return res.status(400).json({ ok: false, error: 'invalid component' });
   const { stdout, stderr } = await adb(['shell', 'cmd', 'package', 'set-home-activity', component]);
   res.json({ ok: /Success/i.test(stdout + stderr), message: (stdout + stderr).trim() });
 }));
@@ -417,6 +466,11 @@ const consoleWss = new WebSocketServer({ noServer: true });
 const screenWss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
+  if (!passwordOk(req) || !sameOrigin(req)) {
+    socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
   const { pathname } = new URL(req.url, 'http://localhost');
   if (pathname === '/ws/console') {
     consoleWss.handleUpgrade(req, socket, head, (ws) => consoleWss.emit('connection', ws, req));
@@ -513,13 +567,17 @@ screenWss.on('connection', (ws) => {
     let m;
     try { m = JSON.parse(msg.toString()); } catch { return; }
     const args = ['-s', serial, 'shell', 'input'];
+    const num = (v) => (Number.isFinite(Number(v)) ? String(Math.round(Number(v))) : null);
     if (m.type === 'tap') {
+      if (num(m.x) === null || num(m.y) === null) return;
       spawn(ADB, [...args, 'tap', String(Math.round(m.x)), String(Math.round(m.y))]);
     } else if (m.type === 'swipe') {
+      if ([m.x1, m.y1, m.x2, m.y2].some((v) => num(v) === null)) return;
       spawn(ADB, [...args, 'swipe', String(Math.round(m.x1)), String(Math.round(m.y1)),
-        String(Math.round(m.x2)), String(Math.round(m.y2)), String(m.dur || 200)]);
+        String(Math.round(m.x2)), String(Math.round(m.y2)), num(m.dur) || '200']);
     } else if (m.type === 'key') {
-      spawn(ADB, [...args, 'keyevent', String(m.code)]);
+      if (!Number.isInteger(Number(m.code))) return;
+      spawn(ADB, [...args, 'keyevent', String(Number(m.code))]);
     } else if (m.type === 'text') {
       const safe = String(m.text).replace(/ /g, '%s').replace(/(["'`$\\&;|<>()])/g, '\\$1');
       spawn(ADB, [...args, 'text', safe]);
@@ -545,9 +603,10 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log('  / /   / ___/ __ `__ \\/ __ \\/ __  / __ `/ __ \\/ __  / / __/');
   console.log(' / /___/ /  / / / / / / /_/ / /_/ / /_/ / / / / /_/ / / /_  ');
   console.log(' \\____/_/  /_/ /_/ /_/_.___/_____/\\__,_/_/ /_/\\__,_/_/\\__/  ');
-  console.log(`${X}${R}            >> CrashBandit-ADB-Tool  v1.0.0 <<${X}`);
+  console.log(`${X}${R}            >> CrashBandit-ADB-Tool  v1.1.0 <<${X}`);
   console.log(`${G}[INFO]${X} CrashBandit-ADB-Tool Core Initialized...`);
   console.log(`${G}[INFO]${X} Listening on http://0.0.0.0:${PORT}`);
   console.log(`${G}[INFO]${X} adb binary: ${ADB} | server root: ${SERVER_ROOT}`);
-  console.log(`${R}[WARN]${X} Raw shell access exposed — keep this on a trusted network only.`);
+  if (PASSWORD) console.log(`${G}[INFO]${X} Login required (ADB_TOOL_PASSWORD is set).`);
+  else console.log(`${R}[WARN]${X} No ADB_TOOL_PASSWORD set — anyone on your network gets full shell access to connected phones!`);
 });

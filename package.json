@@ -1,6 +1,6 @@
 {
   "name": "crashbandit-adb-tool",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "CrashBandit-ADB-Tool — self-hosted web-based Android management tool over ADB Wi-Fi (cyberpunk UI)",
   "main": "server.js",
   "type": "commonjs",
@@ -9,7 +9,7 @@
     "dev": "node server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "express": "^4.19.2",

@@ -24,6 +24,8 @@ services:
       - PORT=3000
       - SERVER_ROOT=/data
       - ADB_BIN=adb
+      # Login password (recommended!). Any user name works in the browser prompt.
+      - ADB_TOOL_PASSWORD=${ADB_TOOL_PASSWORD:-}
     volumes:
       # Persist the adb keypair so devices stay authorized across restarts.
       - adb-keys:/root/.android
